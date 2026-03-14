@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>US News Aggregator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="logo">
+        <span class="flag">🇺🇸</span>
+        <span class="logo-text">US News Today</span>
+      </div>
+      <div class="header-meta">
+        <span id="last-updated"></span>
+        <button id="refresh-btn" title="Refresh news">&#8635; Refresh</button>
+      </div>
+    </div>
+    <nav class="category-nav">
+      <button class="cat-btn active" data-cat="all">All</button>
+      <button class="cat-btn" data-cat="General">General</button>
+      <button class="cat-btn" data-cat="Politics">Politics</button>
+      <button class="cat-btn" data-cat="Business">Business</button>
+      <button class="cat-btn" data-cat="Technology">Technology</button>
+      <button class="cat-btn" data-cat="Sports">Sports</button>
+      <button class="cat-btn" data-cat="Health">Health</button>
+    </nav>
+  </header>
+
+  <main>
+    <div id="search-bar">
+      <input type="text" id="search-input" placeholder="Search headlines..." autocomplete="off" />
+    </div>
+    <div id="stats-bar"></div>
+    <div id="news-grid"></div>
+    <div id="load-more-wrap">
+      <button id="load-more-btn">Load More</button>
+    </div>
+    <div id="loading" class="hidden">
+      <div class="spinner"></div>
+      <p>Fetching latest US news…</p>
+    </div>
+    <div id="error-msg" class="hidden"></div>
+  </main>
+
+  <footer>
+    <p>US News Aggregator &mdash; Aggregating headlines from top American news sources</p>
+    <p class="sources-note">Sources: AP, NPR, Reuters, CBS, NBC, ABC, CNN, Fox News, USA Today, WaPo, NYT, Politico, ESPN, Bloomberg, CNBC, TechCrunch, Ars Technica &amp; more</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
