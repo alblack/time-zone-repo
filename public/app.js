@@ -3,7 +3,7 @@
 
   const CATEGORY_ICONS = {
     General: '📰', Politics: '🏛️', Business: '💼',
-    Technology: '💻', Sports: '🏆', Health: '🏥',
+    Technology: '💻', Sports: '🏆', Health: '🏥', Science: '🔬',
   };
 
   let state = {

@@ -11,71 +11,92 @@ const parser = new Parser({
 const cache = new NodeCache({ stdTTL: 300 }); // 5-minute cache
 
 const NEWS_SOURCES = [
+  // Wire services — gold standard of factual reporting
   {
-    name: 'AP News',
-    url: 'https://rsshub.app/apnews/topics/apf-usnews',
+    name: 'Associated Press',
+    url: 'https://feeds.apnews.com/rss/apf-topnews',
     category: 'General',
-    fallback: 'https://feeds.apnews.com/rss/apf-usnews',
   },
+  {
+    name: 'Reuters',
+    url: 'https://feeds.reuters.com/reuters/topNews',
+    category: 'General',
+  },
+  {
+    name: 'AFP (via Yahoo)',
+    url: 'https://news.yahoo.com/rss/',
+    category: 'General',
+  },
+
+  // Public broadcasting
   {
     name: 'NPR News',
     url: 'https://feeds.npr.org/1001/rss.xml',
     category: 'General',
   },
   {
-    name: 'NPR Politics',
-    url: 'https://feeds.npr.org/1014/rss.xml',
-    category: 'Politics',
-  },
-  {
-    name: 'Reuters US',
-    url: 'https://feeds.reuters.com/reuters/domesticNews',
+    name: 'PBS NewsHour',
+    url: 'https://www.pbs.org/newshour/feeds/rss/headlines',
     category: 'General',
   },
   {
-    name: 'The Hill',
-    url: 'https://thehill.com/rss/syndicator/19109',
-    category: 'Politics',
-  },
-  {
-    name: 'CBS News',
-    url: 'https://www.cbsnews.com/latest/rss/us',
+    name: 'BBC World News',
+    url: 'https://feeds.bbci.co.uk/news/world/rss.xml',
     category: 'General',
   },
   {
-    name: 'NBC News',
-    url: 'https://feeds.nbcnews.com/nbcnews/public/news',
+    name: 'BBC US & Canada',
+    url: 'https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml',
+    category: 'General',
+  },
+
+  // Tier-1 newspapers (long track record, Pulitzer-winning)
+  {
+    name: 'The New York Times',
+    url: 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml',
     category: 'General',
   },
   {
-    name: 'ABC News',
-    url: 'https://abcnews.go.com/abcnews/usheadlines',
+    name: 'NYT US News',
+    url: 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
     category: 'General',
   },
   {
-    name: 'CNN',
-    url: 'http://rss.cnn.com/rss/cnn_us.rss',
-    category: 'General',
-  },
-  {
-    name: 'Fox News',
-    url: 'https://moxie.foxnews.com/google-publisher/us.xml',
-    category: 'General',
-  },
-  {
-    name: 'USA Today',
-    url: 'https://rssfeeds.usatoday.com/usatoday-NewsTopStories',
-    category: 'General',
-  },
-  {
-    name: 'Washington Post',
+    name: 'The Washington Post',
     url: 'https://feeds.washingtonpost.com/rss/national',
     category: 'General',
   },
   {
-    name: 'NYT US',
-    url: 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml',
+    name: 'The Guardian US',
+    url: 'https://www.theguardian.com/us-news/rss',
     category: 'General',
+  },
+  {
+    name: 'The Economist',
+    url: 'https://www.economist.com/united-states/rss.xml',
+    category: 'General',
+  },
+  {
+    name: 'Financial Times',
+    url: 'https://www.ft.com/rss/home',
+    category: 'Business',
+  },
+  {
+    name: 'Wall Street Journal',
+    url: 'https://feeds.a.dj.com/rss/RSSWorldNews.xml',
+    category: 'Business',
+  },
+  {
+    name: 'Los Angeles Times',
+    url: 'https://www.latimes.com/rss2.0.xml',
+    category: 'General',
+  },
+
+  // Politics
+  {
+    name: 'NPR Politics',
+    url: 'https://feeds.npr.org/1014/rss.xml',
+    category: 'Politics',
   },
   {
     name: 'Politico',
@@ -83,10 +104,34 @@ const NEWS_SOURCES = [
     category: 'Politics',
   },
   {
-    name: 'ESPN',
-    url: 'https://www.espn.com/espn/rss/news',
-    category: 'Sports',
+    name: 'The Hill',
+    url: 'https://thehill.com/rss/syndicator/19109',
+    category: 'Politics',
   },
+
+  // Science & Health
+  {
+    name: 'Science | AAAS',
+    url: 'https://www.science.org/rss/news_current.xml',
+    category: 'Science',
+  },
+  {
+    name: 'Nature News',
+    url: 'https://www.nature.com/nature.rss',
+    category: 'Science',
+  },
+  {
+    name: 'Scientific American',
+    url: 'https://rss.sciam.com/ScientificAmerican-Global',
+    category: 'Science',
+  },
+  {
+    name: 'STAT News',
+    url: 'https://www.statnews.com/feed/',
+    category: 'Health',
+  },
+
+  // Business & Finance
   {
     name: 'Bloomberg',
     url: 'https://feeds.bloomberg.com/markets/news.rss',
@@ -97,9 +142,11 @@ const NEWS_SOURCES = [
     url: 'https://www.cnbc.com/id/100003114/device/rss/rss.html',
     category: 'Business',
   },
+
+  // Technology
   {
-    name: 'TechCrunch',
-    url: 'https://techcrunch.com/feed/',
+    name: 'MIT Technology Review',
+    url: 'https://www.technologyreview.com/feed/',
     category: 'Technology',
   },
   {
@@ -108,9 +155,9 @@ const NEWS_SOURCES = [
     category: 'Technology',
   },
   {
-    name: 'Healthline',
-    url: 'https://www.healthline.com/rss/health-news',
-    category: 'Health',
+    name: 'Wired',
+    url: 'https://www.wired.com/feed/rss',
+    category: 'Technology',
   },
 ];
 
