@@ -52,7 +52,7 @@
   function createCard(article) {
     const card = document.createElement('a');
     card.className = 'news-card';
-    card.href = article.link;
+    if (/^https?:\/\//i.test(article.link)) card.href = article.link;
     card.target = '_blank';
     card.rel = 'noopener noreferrer';
 

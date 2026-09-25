@@ -170,18 +170,29 @@ async function fetchFeed(source) {
       const feed = await parser.parseURL(url);
       return (feed.items || []).slice(0, 10).map((item) => ({
         title: item.title || '',
-        link: item.link || item.guid || '',
+        link: safeUrl(item.link) || safeUrl(item.guid) || '',
         summary: stripHtml(item.contentSnippet || item.content || item.summary || '').slice(0, 300),
         pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
         source: source.name,
         category: source.category,
-        imageUrl: extractImage(item),
+        imageUrl: safeUrl(extractImage(item)),
       }));
     } catch {
       // try fallback or give up
     }
   }
   return [];
+}
+
+// Feed content is untrusted: only allow http(s) URLs through to the client.
+function safeUrl(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function stripHtml(html) {
@@ -227,20 +238,30 @@ async function getNews(category) {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+const CATEGORIES = new Set(NEWS_SOURCES.map((s) => s.category));
+
+function toInt(value, fallback, min, max) {
+  const n = parseInt(value, 10);
+  return Number.isNaN(n) ? fallback : Math.min(Math.max(n, min), max);
+}
+
 app.get('/api/news', async (req, res) => {
   try {
-    const { category, page = 1, limit = 20 } = req.query;
+    const category = CATEGORIES.has(req.query.category) ? req.query.category : 'all';
+    const page = toInt(req.query.page, 1, 1, 1000);
+    const limit = toInt(req.query.limit, 20, 1, 100);
     const all = await getNews(category);
     const start = (page - 1) * limit;
     const items = all.slice(start, start + Number(limit));
     res.json({
       articles: items,
       total: all.length,
-      page: Number(page),
+      page,
       pages: Math.ceil(all.length / limit),
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch news', message: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch news' });
   }
 });
 
