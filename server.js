@@ -294,7 +294,7 @@ app.get('/api/sources', (req, res) => {
   res.json(NEWS_SOURCES.map(({ name, category }) => ({ name, category })));
 });
 
-module.exports = { app, safeUrl };
+module.exports = { app, safeUrl, fetchFeed };
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
