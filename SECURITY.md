@@ -25,7 +25,8 @@
 
 ## Known gaps / inference (not verified)
 - Live RSS fetching was not exercised (sandbox network); feed-parsing paths are untested.
-- CSP was verified via headers, not in a real browser render.
+- CSP and client sanitization were verified in headless Chromium with a stubbed `/api/news` containing hostile data (`javascript:` link, HTML in title, broken image): link became `#`, no HTML injected, image fell back to the placeholder, CSP raised no violations on the app's own assets. This check is a one-off script, not part of `npm test`.
+- Side effect of the CSP: `img-src` allows https only, so articles with plain-http images show the placeholder icon.
 - Rate limiting is per-IP; behind a proxy set `app.set('trust proxy', …)` appropriately.
 - Some feed URLs (e.g. Reuters) may be defunct — a reliability, not security, issue.
 - Enable branch protection and GitHub secret scanning in repo settings (cannot be done from code).
