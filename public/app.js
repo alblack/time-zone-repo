@@ -49,15 +49,26 @@
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
+  function safeUrl(url) {
+    try {
+      const u = new URL(url);
+      return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+    } catch {
+      return null;
+    }
+  }
+
   function createCard(article) {
+    const link = safeUrl(article.link);
+    const imageUrl = safeUrl(article.imageUrl);
     const card = document.createElement('a');
     card.className = 'news-card';
-    card.href = article.link;
+    if (link) card.href = link;
     card.target = '_blank';
     card.rel = 'noopener noreferrer';
 
-    const imageHtml = article.imageUrl
-      ? `<img class="card-image" src="${escHtml(article.imageUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    const imageHtml = imageUrl
+      ? `<img class="card-image" src="${escHtml(imageUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
         + `<div class="card-image-placeholder" style="display:none">${CATEGORY_ICONS[article.category] || '📰'}</div>`
       : `<div class="card-image-placeholder">${CATEGORY_ICONS[article.category] || '📰'}</div>`;
 

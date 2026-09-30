@@ -161,6 +161,8 @@ const NEWS_SOURCES = [
   },
 ];
 
+const CATEGORIES = [...new Set(NEWS_SOURCES.map((s) => s.category))];
+
 async function fetchFeed(source) {
   const urls = [source.url];
   if (source.fallback) urls.push(source.fallback);
@@ -229,7 +231,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/news', async (req, res) => {
   try {
-    const { category, page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20 } = req.query;
+    const category = typeof req.query.category === 'string' ? req.query.category : 'all';
+    if (category !== 'all' && !CATEGORIES.includes(category)) {
+      // Unknown category: empty result, and never touch the cache
+      return res.json({ articles: [], total: 0, page: 1, pages: 0 });
+    }
     const all = await getNews(category);
     const start = (page - 1) * limit;
     const items = all.slice(start, start + Number(limit));
@@ -245,8 +252,7 @@ app.get('/api/news', async (req, res) => {
 });
 
 app.get('/api/categories', (req, res) => {
-  const cats = [...new Set(NEWS_SOURCES.map((s) => s.category))];
-  res.json(cats);
+  res.json(CATEGORIES);
 });
 
 app.get('/api/sources', (req, res) => {
