@@ -297,3 +297,5 @@ footer .sources-note { color: rgba(255,255,255,0.5); font-size: 0.75rem; }
   #news-grid { grid-template-columns: 1fr; }
   .header-inner { flex-wrap: wrap; }
 }
+
+.empty-state { color: var(--text-muted); padding: 40px 0; }

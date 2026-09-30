@@ -1,14 +1,35 @@
 const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const Parser = require('rss-parser');
 const NodeCache = require('node-cache');
 const path = require('path');
 
 const app = express();
+app.disable('x-powered-by');
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        // Feed images come from arbitrary publisher CDNs
+        imgSrc: ["'self'", 'https:', 'data:'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: null, // app may be served over plain HTTP behind a proxy
+      },
+    },
+  })
+);
+app.use('/api/', rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
 const parser = new Parser({
   timeout: 10000,
   headers: { 'User-Agent': 'USNewsAggregator/1.0' },
 });
-const cache = new NodeCache({ stdTTL: 300 }); // 5-minute cache
+const cache = new NodeCache({ stdTTL: 300, maxKeys: 50 }); // 5-minute cache, bounded
 
 const NEWS_SOURCES = [
   // Wire services — gold standard of factual reporting
@@ -170,18 +191,28 @@ async function fetchFeed(source) {
       const feed = await parser.parseURL(url);
       return (feed.items || []).slice(0, 10).map((item) => ({
         title: item.title || '',
-        link: item.link || item.guid || '',
+        link: safeUrl(item.link || item.guid) || '',
         summary: stripHtml(item.contentSnippet || item.content || item.summary || '').slice(0, 300),
         pubDate: item.pubDate || item.isoDate || new Date().toISOString(),
         source: source.name,
         category: source.category,
-        imageUrl: extractImage(item),
+        imageUrl: safeUrl(extractImage(item)),
       }));
     } catch {
       // try fallback or give up
     }
   }
   return [];
+}
+
+// Feed content is untrusted: only allow absolute http(s) URLs
+function safeUrl(value) {
+  try {
+    const u = new URL(String(value));
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function stripHtml(html) {
@@ -227,20 +258,30 @@ async function getNews(category) {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+const CATEGORIES = new Set(NEWS_SOURCES.map((s) => s.category));
+
 app.get('/api/news', async (req, res) => {
+  const { category } = req.query;
+  if (category !== undefined && category !== 'all' && !CATEGORIES.has(category)) {
+    return res.status(400).json({ error: 'Invalid category' });
+  }
+  const page = Number.parseInt(req.query.page ?? '1', 10);
+  const limit = Number.parseInt(req.query.limit ?? '20', 10);
+  if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 50) {
+    return res.status(400).json({ error: 'Invalid page or limit' });
+  }
   try {
-    const { category, page = 1, limit = 20 } = req.query;
     const all = await getNews(category);
     const start = (page - 1) * limit;
-    const items = all.slice(start, start + Number(limit));
     res.json({
-      articles: items,
+      articles: all.slice(start, start + limit),
       total: all.length,
-      page: Number(page),
+      page,
       pages: Math.ceil(all.length / limit),
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch news', message: err.message });
+    console.error('Failed to fetch news:', err);
+    res.status(500).json({ error: 'Failed to fetch news' });
   }
 });
 
@@ -253,7 +294,12 @@ app.get('/api/sources', (req, res) => {
   res.json(NEWS_SOURCES.map(({ name, category }) => ({ name, category })));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`US News Aggregator running at http://localhost:${PORT}`);
-});
+module.exports = { app, safeUrl };
+
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  const server = app.listen(PORT, () => {
+    console.log(`US News Aggregator running at http://localhost:${PORT}`);
+  });
+  process.on('SIGTERM', () => server.close(() => process.exit(0)));
+}
