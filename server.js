@@ -223,7 +223,8 @@ async function getNews(category) {
     return true;
   });
 
-  cache.set(cacheKey, unique);
+  // Don't cache empty results so a temporary feed outage doesn't stick for the TTL
+  if (unique.length) cache.set(cacheKey, unique);
   return unique;
 }
 
@@ -259,7 +260,11 @@ app.get('/api/sources', (req, res) => {
   res.json(NEWS_SOURCES.map(({ name, category }) => ({ name, category })));
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`US News Aggregator running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`US News Aggregator running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = { app, parser, cache, getNews, CATEGORIES };

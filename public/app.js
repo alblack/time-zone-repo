@@ -49,15 +49,6 @@
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
-  function safeUrl(url) {
-    try {
-      const u = new URL(url);
-      return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
-    } catch {
-      return null;
-    }
-  }
-
   function createCard(article) {
     const link = safeUrl(article.link);
     const imageUrl = safeUrl(article.imageUrl);
