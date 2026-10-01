@@ -52,14 +52,16 @@
   function createCard(article) {
     const card = document.createElement('a');
     card.className = 'news-card';
-    card.href = article.link;
+    card.href = /^https?:\/\//i.test(article.link) ? article.link : '#';
     card.target = '_blank';
     card.rel = 'noopener noreferrer';
 
-    const imageHtml = article.imageUrl
-      ? `<img class="card-image" src="${escHtml(article.imageUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-        + `<div class="card-image-placeholder" style="display:none">${CATEGORY_ICONS[article.category] || '📰'}</div>`
-      : `<div class="card-image-placeholder">${CATEGORY_ICONS[article.category] || '📰'}</div>`;
+    // No inline handlers/styles: the CSP forbids them
+    const icon = CATEGORY_ICONS[article.category] || '📰';
+    const imageHtml = article.imageUrl && /^https?:\/\//i.test(article.imageUrl)
+      ? `<img class="card-image" src="${escHtml(article.imageUrl)}" alt="" loading="lazy">`
+        + `<div class="card-image-placeholder hidden">${icon}</div>`
+      : `<div class="card-image-placeholder">${icon}</div>`;
 
     card.innerHTML = `
       ${imageHtml}
@@ -73,6 +75,13 @@
         <div class="card-date">&#128337; ${formatDate(article.pubDate)}</div>
       </div>
     `;
+    const img = card.querySelector('img.card-image');
+    if (img) {
+      img.addEventListener('error', () => {
+        img.classList.add('hidden');
+        img.nextElementSibling.classList.remove('hidden');
+      });
+    }
     return card;
   }
 
@@ -81,7 +90,8 @@
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function filterArticles(articles) {
@@ -96,7 +106,7 @@
     if (!append) grid.innerHTML = '';
     const filtered = filterArticles(articles);
     if (!filtered.length && !append) {
-      grid.innerHTML = '<p style="color:var(--text-muted);padding:40px 0">No articles found.</p>';
+      grid.innerHTML = '<p class="empty-state">No articles found.</p>';
       return;
     }
     const frag = document.createDocumentFragment();
