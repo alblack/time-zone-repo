@@ -43,6 +43,7 @@
       {
         "matcher": "Write|Edit",
         "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-html-sinks.js\"" },
           { "type": "command", "command": "npm test --silent" }
         ]
       }
