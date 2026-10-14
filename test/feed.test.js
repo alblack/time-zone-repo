@@ -121,3 +121,25 @@ test('different categories are fetched independently', async () => {
   await Promise.all([getNews('General'), getNews('Technology')]);
   assert.ok(calls > GENERAL_SOURCES_ACTUAL);
 });
+
+test('a malformed media:content / media:thumbnail does not drop the feed', async () => {
+  nextFeed = {
+    items: [
+      { title: 'No attrs', link: 'https://example.com/1', 'media:content': {} },
+      { title: 'Empty attrs', link: 'https://example.com/2', 'media:content': { $: {} } },
+      { title: 'Thumb no attrs', link: 'https://example.com/3', 'media:thumbnail': {} },
+      { title: 'Null media', link: 'https://example.com/4', 'media:content': null },
+      { title: 'Good media', link: 'https://example.com/5', 'media:content': { $: { url: 'https://example.com/i.jpg' } } },
+      { title: 'Bad scheme', link: 'https://example.com/6', 'media:content': { $: { url: 'javascript:alert(1)' } } },
+    ],
+  };
+  const items = await fetchFeed(src);
+  assert.strictEqual(items.length, 6, 'one bad item must not drop the others');
+  const img = Object.fromEntries(items.map((i) => [i.title, i.imageUrl]));
+  assert.strictEqual(img['No attrs'], null);
+  assert.strictEqual(img['Empty attrs'], null);
+  assert.strictEqual(img['Thumb no attrs'], null);
+  assert.strictEqual(img['Null media'], null);
+  assert.strictEqual(img['Good media'], 'https://example.com/i.jpg');
+  assert.strictEqual(img['Bad scheme'], null);
+});

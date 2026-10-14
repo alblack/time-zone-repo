@@ -273,8 +273,8 @@ function stripHtml(html) {
 
 function extractImage(item) {
   if (item.enclosure && item.enclosure.url) return item.enclosure.url;
-  if (item['media:content'] && item['media:content'].$.url) return item['media:content'].$.url;
-  if (item['media:thumbnail'] && item['media:thumbnail'].$.url) return item['media:thumbnail'].$.url;
+  if (item['media:content']?.$?.url) return item['media:content'].$.url;
+  if (item['media:thumbnail']?.$?.url) return item['media:thumbnail'].$.url;
   const match = (item.content || item.summary || '').match(/<img[^>]+src="([^"]+)"/i);
   return match ? match[1] : null;
 }
