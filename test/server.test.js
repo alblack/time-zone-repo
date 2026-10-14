@@ -103,3 +103,17 @@ test('unexpected errors return a generic 500 and are not leaked', async () => {
     s.close();
   }
 });
+
+test('CSP directives are as intended (img-src has no data:, no unsafe-* or wildcards)', async () => {
+  const csp = (await fetch(`${base}/`)).headers.get('content-security-policy');
+  const d = Object.fromEntries(csp.split(';').map((s) => s.trim().split(/\s+/)).map(([k, ...v]) => [k, v.join(' ')]));
+  assert.strictEqual(d['default-src'], "'self'");
+  assert.strictEqual(d['script-src'], "'self'");
+  assert.strictEqual(d['style-src'], "'self'");
+  // https: is deliberate (feed images come from publisher CDNs); data: is not needed
+  assert.strictEqual(d['img-src'], "'self' https:");
+  assert.strictEqual(d['object-src'], "'none'");
+  assert.strictEqual(d['base-uri'], "'self'");
+  assert.strictEqual(d['frame-ancestors'], "'none'");
+  assert.ok(!/unsafe-|\*/.test(csp), csp);
+});
