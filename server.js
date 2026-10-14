@@ -9,7 +9,8 @@ const net = require('net');
 // TRUST_PROXY: how many reverse proxies sit in front of this app, so req.ip (and therefore the per-IP
 // rate limit) is the real client and not the proxy. Unset = trust none (Express default). Accepts a hop
 // count (1-10) or a comma-separated list of loopback/linklocal/uniquelocal, IPs and CIDRs. Never `true`:
-// that would let any client choose its own IP through X-Forwarded-For. Invalid values fail at startup.
+// that would let any client choose its own IP through X-Forwarded-For, and so would a very wide CIDR.
+// The hop count must equal the real number of proxies. Invalid values fail at startup.
 function parseTrustProxy(value) {
   const v = String(value ?? '').trim();
   if (!v) return undefined;
@@ -23,10 +24,20 @@ function parseTrustProxy(value) {
   for (const token of v.split(',').map((t) => t.trim())) {
     if (['loopback', 'linklocal', 'uniquelocal'].includes(token)) continue;
     const [addr, prefix, extra] = token.split('/');
-    const max = net.isIPv4(addr) ? 32 : net.isIPv6(addr) ? 128 : 0;
-    if (!max || extra !== undefined) fail();
-    // A /0 prefix would trust every address, which is the same as `true`
-    if (prefix !== undefined && !(/^\d{1,3}$/.test(prefix) && Number(prefix) >= 1 && Number(prefix) <= max)) fail();
+    const family = net.isIPv4(addr) ? 4 : net.isIPv6(addr) ? 6 : 0;
+    if (!family || extra !== undefined) fail();
+    if (prefix === undefined) continue; // a single host
+    if (!/^\d{1,3}$/.test(prefix) || Number(prefix) > (family === 4 ? 32 : 128)) fail();
+    // A short prefix trusts a large part of the internet, which is the same as `true`: anyone in that
+    // range could set X-Forwarded-For and pick their own rate-limit bucket. Allow /8 and longer for IPv4,
+    // /16 and longer for IPv6, plus the two standard wide IPv6 private blocks (fc00::/7, fe80::/10).
+    const bits = Number(prefix);
+    const a = addr.toLowerCase();
+    const mapped = family === 6 && a.startsWith('::ffff:'); // IPv4-mapped: the v4 prefix is bits - 96
+    const ok = family === 4 ? bits >= 8
+      : mapped ? bits >= 96 + 8
+      : bits >= 16 || (/^f[cd]/.test(a) && bits >= 7) || (/^fe[89ab]/.test(a) && bits >= 10);
+    if (!ok) fail();
   }
   return v;
 }
@@ -61,7 +72,7 @@ function envInt(name, fallback) {
   const n = Number.parseInt(process.env[name] ?? '', 10);
   return Number.isInteger(n) && n > 0 ? n : fallback;
 }
-const FEED_TIMEOUT_MS = 10000;
+const FEED_TIMEOUT_MS = envInt('FEED_TIMEOUT_MS', 10000); // total time for one feed fetch, redirects included
 const FEED_MAX_BYTES = envInt('FEED_MAX_BYTES', 2 * 1024 * 1024); // cap on one feed body, after decompression
 // An empty result (every feed failed) is cached briefly so an outage is not re-fetched by every request.
 const NEGATIVE_CACHE_SECONDS = envInt('NEGATIVE_CACHE_SECONDS', 20);
@@ -217,16 +228,68 @@ const NEWS_SOURCES = [
   },
 ];
 
-// Feed content is untrusted: bound the time and size of every fetch.
-// (rss-parser's own parseURL has a timeout but no size limit.)
+// True for hosts a redirect must never lead to: localhost names and private, loopback, link-local,
+// cloud-metadata, multicast and otherwise non-public IP literals. (Hostnames that merely resolve to
+// such an address, e.g. DNS rebinding, are not caught here.)
+function isBlockedHost(hostname) {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (net.isIPv4(h)) return isBlockedV4(h.split('.').map(Number));
+  if (net.isIPv6(h)) {
+    const b = ipv6Bytes(h);
+    if (b.every((x, i) => x === 0 || i === 15)) return true; // :: and ::1
+    const mapped = b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff;
+    const nat64 = b.slice(0, 12).join() === [0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0].join();
+    if (mapped || nat64) return isBlockedV4(b.slice(12));
+    return (b[0] & 0xfe) === 0xfc || (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) || b[0] === 0xff; // fc00::/7, fe80::/10, multicast
+  }
+  return false;
+}
+function isBlockedV4([a, b]) {
+  return a === 0 || a === 10 || a === 127 || a >= 224
+    || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+function ipv6Bytes(ip) {
+  const [head, tail = ''] = ip.split('::');
+  const groups = (x) => (x ? x.split(':') : []);
+  const h = groups(head);
+  const t = ip.includes('::') ? groups(tail) : [];
+  const all = ip.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
+  return all.flatMap((g) => { const n = parseInt(g, 16); return [n >> 8, n & 0xff]; });
+}
+
+const MAX_REDIRECTS = 5;
+
+// Feed content is untrusted: bound the time, size and redirects of every fetch.
+// (rss-parser's own parseURL has a timeout but no size limit and follows redirects blindly.)
 async function fetchFeedText(url) {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
-    headers: {
-      'User-Agent': 'USNewsAggregator/1.0',
-      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-    },
-  });
+  const signal = AbortSignal.timeout(FEED_TIMEOUT_MS); // one budget for the whole chain, body included
+  const origin = new URL(url).origin;
+  let current = url;
+  let res;
+  for (let hops = 0; ; hops++) {
+    res = await fetch(current, {
+      signal,
+      redirect: 'manual',
+      headers: {
+        'User-Agent': 'USNewsAggregator/1.0',
+        Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+      },
+    });
+    const location = res.headers.get('location');
+    if (res.status < 300 || res.status >= 400 || !location) break;
+    await res.body?.cancel();
+    if (hops >= MAX_REDIRECTS) throw new Error('Too many redirects');
+    let next;
+    try { next = new URL(location, current); } catch { throw new Error('Redirect to an invalid address'); }
+    // Feed URLs are trusted constants; where they send us is not. Same-origin redirects are fine, a
+    // cross-origin one must be http(s) and must not point at an internal address.
+    if (!['http:', 'https:'].includes(next.protocol) || (next.origin !== origin && isBlockedHost(next.hostname))) {
+      throw new Error('Redirect to a disallowed address');
+    }
+    current = next.href;
+  }
   if (!res.ok) {
     await res.body?.cancel();
     throw new Error(`HTTP ${res.status}`);
@@ -399,6 +462,7 @@ app.use((req, res) => {
 
 // Final handler: never send err.message, stacks or paths to clients.
 function errorHandler(err, req, res, next) {
+  if (res.headersSent) return next(err); // too late to send JSON; let Express close the connection
   const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
   if (status === 500) console.error('Unhandled error:', err);
   res.status(status).json({ error: status === 500 ? 'Internal error' : status === 404 ? 'Not found' : 'Bad request' });

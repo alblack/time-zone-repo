@@ -8,6 +8,10 @@ process.stdin.on('end', () => {
     /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/,
     /sk-ant-[A-Za-z0-9_-]{20,}/,
     /ghp_[A-Za-z0-9]{36}/,
+    /github_pat_[A-Za-z0-9_]{22,}/,
+    /xox[baprs]-[A-Za-z0-9-]{10,}/,
+    /AIza[0-9A-Za-z_-]{35}/,
+    /sk_live_[0-9A-Za-z]{24,}/,
   ];
   if (patterns.some((p) => p.test(input))) {
     console.error('Blocked: content looks like a secret. Use environment variables instead.');

@@ -49,12 +49,30 @@ test('baseline deny rules are intact', () => {
   for (const rule of required) assert.ok(settings.permissions.deny.includes(rule), `deny is missing ${rule}`);
 });
 
+test('the allow list is exactly the reviewed set (any addition must be a deliberate change here)', () => {
+  assert.deepStrictEqual([...settings.permissions.allow].sort(), [
+    'Bash(git diff origin/main...HEAD)', 'Bash(git diff --staged)', 'Bash(git diff)', 'Bash(git log*)',
+    'Bash(git status*)', 'Bash(npm audit)', 'Bash(npm ls*)', 'Bash(npm run audit)', 'Bash(npm test)',
+  ].sort());
+});
+
 test('allow rules stay narrow: no wildcard that can write files or modify dependencies', () => {
   const readOnlyGlobs = new Set(['Bash(npm ls*)', 'Bash(git status*)', 'Bash(git log*)']);
   for (const rule of settings.permissions.allow) {
     if (rule.includes('*')) assert.ok(readOnlyGlobs.has(rule), `"${rule}" is a broad glob; allow the exact command instead`);
   }
-  const allow = settings.permissions.allow;
-  assert.ok(!allow.some((r) => /^Bash\(npm audit/.test(r) && r !== 'Bash(npm audit)'), 'npm audit fix must not be pre-approved');
-  assert.ok(allow.includes('Bash(git diff origin/main...HEAD)'), 'the security-reviewer subagent needs this exact diff');
+});
+
+test('the secret blocker recognises more token formats', () => {
+  const hook = path.join(root, '.claude', 'hooks', 'block-secrets.js');
+  const run = (content) => spawnSync('node', [hook], { input: JSON.stringify({ tool_input: { content } }), encoding: 'utf8' });
+  // Built at runtime so this file does not itself look like a secret
+  const samples = {
+    'fine-grained GitHub token': 'github_' + 'pat_' + 'A1b2C3d4E5f6G7h8I9j0K1_' + 'x'.repeat(20),
+    'Slack token': 'xo' + 'xb-' + '1234567890-' + 'abcdefghij',
+    'Google API key': 'AI' + 'za' + 'Sy' + 'A'.repeat(33),
+    'Stripe live key': 'sk_' + 'live_' + 'a1B2c3D4e5F6g7H8i9J0k1L2',
+  };
+  for (const [name, value] of Object.entries(samples)) assert.strictEqual(run(`token = "${value}"`).status, 2, name);
+  assert.strictEqual(run('const github = "pat"; const slack = "xoxo"; const sk = "sk_test"').status, 0, 'near-misses are allowed');
 });

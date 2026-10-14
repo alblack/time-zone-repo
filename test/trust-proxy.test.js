@@ -30,6 +30,18 @@ test('parseTrustProxy: rejects permissive or malformed values instead of guessin
   }
 });
 
+test('parseTrustProxy: rejects CIDRs wide enough to trust large parts of the internet', () => {
+  for (const bad of ['0.0.0.0/1', '128.0.0.0/1', '0.0.0.0/7', '8.0.0.0/7', '::/1', '::/6', '2000::/3', '::ffff:0.0.0.0/1', '::ffff:0.0.0.0/96', '::ffff:0.0.0.0/103']) {
+    assert.throws(() => parseTrustProxy(bad), /TRUST_PROXY/, bad);
+  }
+});
+
+test('parseTrustProxy: still accepts the standard private blocks and single hosts', () => {
+  for (const ok of ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.1', '203.0.113.7/32', 'fc00::/7', 'fe80::/10', '::1', '::ffff:10.0.0.0/104']) {
+    assert.strictEqual(parseTrustProxy(ok), ok, ok);
+  }
+});
+
 let server, base;
 test.before(async () => { await new Promise((r) => { server = app.listen(0, r); }); base = `http://127.0.0.1:${server.address().port}`; });
 test.after(() => server.close());
