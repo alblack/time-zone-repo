@@ -15,7 +15,7 @@ app.use(
         scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
         // Feed images come from arbitrary publisher CDNs
-        imgSrc: ["'self'", 'https:', 'data:'],
+        imgSrc: ["'self'", 'https:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
