@@ -25,11 +25,18 @@ app.use(
   })
 );
 app.use('/api/', rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
-const parser = new Parser({
-  timeout: 10000,
-  headers: { 'User-Agent': 'USNewsAggregator/1.0' },
-});
+const parser = new Parser();
 const cache = new NodeCache({ stdTTL: 300, maxKeys: 50 }); // 5-minute cache, bounded
+
+// Positive-integer config from the environment, falling back to a default.
+function envInt(name, fallback) {
+  const n = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+const FEED_TIMEOUT_MS = 10000;
+const FEED_MAX_BYTES = envInt('FEED_MAX_BYTES', 2 * 1024 * 1024); // cap on one feed body, after decompression
+// An empty result (every feed failed) is cached briefly so an outage is not re-fetched by every request.
+const NEGATIVE_CACHE_SECONDS = envInt('NEGATIVE_CACHE_SECONDS', 20);
 
 const NEWS_SOURCES = [
   // Wire services — gold standard of factual reporting
@@ -182,13 +189,58 @@ const NEWS_SOURCES = [
   },
 ];
 
+// Feed content is untrusted: bound the time and size of every fetch.
+// (rss-parser's own parseURL has a timeout but no size limit.)
+async function fetchFeedText(url) {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+    headers: {
+      'User-Agent': 'USNewsAggregator/1.0',
+      Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+    },
+  });
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(`HTTP ${res.status}`);
+  }
+  const declared = Number(res.headers.get('content-length'));
+  if (declared > FEED_MAX_BYTES) {
+    await res.body?.cancel();
+    throw new Error('Feed too large');
+  }
+  // Count bytes as they arrive: content-length may be absent or wrong, and fetch has
+  // already decompressed the body, so this also bounds gzip bombs.
+  const chunks = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > FEED_MAX_BYTES) {
+      await reader.cancel();
+      throw new Error('Feed too large');
+    }
+    chunks.push(value);
+  }
+  const charset = /charset=["']?([\w-]+)/i.exec(res.headers.get('content-type') || '')?.[1] || 'utf-8';
+  let decoder;
+  try { decoder = new TextDecoder(charset); } catch { decoder = new TextDecoder('utf-8'); }
+  return decoder.decode(Buffer.concat(chunks));
+}
+
+// Seam for tests: fetch and parse one feed URL.
+const feedLoader = {
+  parse: async (url) => parser.parseString(await fetchFeedText(url)),
+};
+
 async function fetchFeed(source) {
   const urls = [source.url];
   if (source.fallback) urls.push(source.fallback);
 
   for (const url of urls) {
     try {
-      const feed = await parser.parseURL(url);
+      const feed = await feedLoader.parse(url);
       return (feed.items || []).slice(0, 10).map((item) => ({
         title: item.title || '',
         link: safeUrl(item.link || item.guid) || '',
@@ -227,11 +279,21 @@ function extractImage(item) {
   return match ? match[1] : null;
 }
 
+// Concurrent cache misses for the same key share one fetch round instead of each fanning out to every feed.
+const inflight = new Map();
+
 async function getNews(category) {
   const cacheKey = `news_${category || 'all'}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
+  if (inflight.has(cacheKey)) return inflight.get(cacheKey);
 
+  const round = loadNews(category, cacheKey).finally(() => inflight.delete(cacheKey));
+  inflight.set(cacheKey, round);
+  return round;
+}
+
+async function loadNews(category, cacheKey) {
   const sources = category && category !== 'all'
     ? NEWS_SOURCES.filter((s) => s.category === category)
     : NEWS_SOURCES;
@@ -252,8 +314,9 @@ async function getNews(category) {
     return true;
   });
 
-  // Don't cache empty results so a temporary feed outage doesn't stick for the TTL
-  if (unique.length) cache.set(cacheKey, unique);
+  // Empty means every feed failed: remember that only briefly, so an outage recovers quickly
+  // but is not re-fetched (27 requests) by every incoming call.
+  cache.set(cacheKey, unique, unique.length ? undefined : NEGATIVE_CACHE_SECONDS);
   return unique;
 }
 
@@ -314,7 +377,9 @@ function errorHandler(err, req, res, next) {
 }
 app.use(errorHandler);
 
-module.exports = { app, safeUrl, fetchFeed, getNews, cache, errorHandler };
+module.exports = {
+  app, safeUrl, fetchFeed, getNews, cache, errorHandler, feedLoader, FEED_MAX_BYTES, NEGATIVE_CACHE_SECONDS,
+};
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
