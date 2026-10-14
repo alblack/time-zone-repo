@@ -4,9 +4,37 @@ const rateLimit = require('express-rate-limit');
 const Parser = require('rss-parser');
 const NodeCache = require('node-cache');
 const path = require('path');
+const net = require('net');
+
+// TRUST_PROXY: how many reverse proxies sit in front of this app, so req.ip (and therefore the per-IP
+// rate limit) is the real client and not the proxy. Unset = trust none (Express default). Accepts a hop
+// count (1-10) or a comma-separated list of loopback/linklocal/uniquelocal, IPs and CIDRs. Never `true`:
+// that would let any client choose its own IP through X-Forwarded-For. Invalid values fail at startup.
+function parseTrustProxy(value) {
+  const v = String(value ?? '').trim();
+  if (!v) return undefined;
+  const fail = () => {
+    throw new Error('Invalid TRUST_PROXY: use a hop count (1-10) or a comma-separated list of loopback, linklocal, uniquelocal, IPs or CIDRs');
+  };
+  if (/^\d+$/.test(v)) {
+    const hops = Number.parseInt(v, 10);
+    return hops >= 1 && hops <= 10 ? hops : fail();
+  }
+  for (const token of v.split(',').map((t) => t.trim())) {
+    if (['loopback', 'linklocal', 'uniquelocal'].includes(token)) continue;
+    const [addr, prefix, extra] = token.split('/');
+    const max = net.isIPv4(addr) ? 32 : net.isIPv6(addr) ? 128 : 0;
+    if (!max || extra !== undefined) fail();
+    // A /0 prefix would trust every address, which is the same as `true`
+    if (prefix !== undefined && !(/^\d{1,3}$/.test(prefix) && Number(prefix) >= 1 && Number(prefix) <= max)) fail();
+  }
+  return v;
+}
 
 const app = express();
 app.disable('x-powered-by');
+const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+if (trustProxy !== undefined) app.set('trust proxy', trustProxy);
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -379,6 +407,7 @@ app.use(errorHandler);
 
 module.exports = {
   app, safeUrl, fetchFeed, getNews, cache, errorHandler, feedLoader, FEED_MAX_BYTES, NEGATIVE_CACHE_SECONDS,
+  parseTrustProxy,
 };
 
 if (require.main === module) {

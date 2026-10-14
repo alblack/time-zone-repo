@@ -27,6 +27,6 @@
 - Live RSS fetching was not exercised (sandbox network); feed handling is covered by `test/feed.test.js` with a stubbed parser, not real feeds.
 - CSP and client sanitization were verified in headless Chromium with a stubbed `/api/news` containing hostile data (`javascript:` link, HTML in title, broken image): link became `#`, no HTML injected, image fell back to the placeholder, CSP raised no violations on the app's own assets. This check is a one-off script, not part of `npm test`.
 - Side effect of the CSP: `img-src` allows https only, so articles with plain-http images show the placeholder icon.
-- Rate limiting is per-IP; behind a proxy set `app.set('trust proxy', …)` appropriately.
+- Rate limiting is per-IP. Behind a reverse proxy set `TRUST_PROXY` (hop count such as `1`, or a list of `loopback`/IPs/CIDRs); otherwise every user shares the proxy's single 60 req/min bucket. `true`, `*` and `/0` are rejected because they let clients pick their own IP; an invalid value stops startup. Unset = trust no proxy.
 - Some feed URLs (e.g. Reuters) may be defunct — a reliability, not security, issue.
 - Enable branch protection and GitHub secret scanning in repo settings (cannot be done from code).
