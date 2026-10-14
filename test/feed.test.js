@@ -11,7 +11,7 @@ Parser.prototype.parseURL = async () => {
 };
 test.after(() => { Parser.prototype.parseURL = original; });
 
-const { fetchFeed } = require('../server');
+const { fetchFeed, getNews, cache } = require('../server');
 const src = { name: 'Src', url: 'https://example.com/rss', category: 'General' };
 
 test('fetchFeed strips unsafe link and image URLs and HTML from summaries', async () => {
@@ -41,4 +41,26 @@ test('fetchFeed keeps valid https links and caps items at 10', async () => {
 test('fetchFeed returns [] when the feed errors', async () => {
   nextFeed = new Error('network down');
   assert.deepStrictEqual(await fetchFeed(src), []);
+});
+
+test('getNews does not cache an empty result, so a feed outage recovers on the next request', async () => {
+  cache.flushAll();
+  nextFeed = new Error('network down');
+  assert.deepStrictEqual(await getNews('General'), []);
+  assert.strictEqual(cache.get('news_General'), undefined);
+
+  nextFeed = { items: [{ title: 'Back online', link: 'https://example.com/ok' }] };
+  const articles = await getNews('General');
+  assert.strictEqual(articles.length, 1);
+  assert.strictEqual(articles[0].title, 'Back online');
+});
+
+test('getNews caches non-empty results', async () => {
+  cache.flushAll();
+  nextFeed = { items: [{ title: 'Cached story', link: 'https://example.com/c' }] };
+  await getNews('General');
+  nextFeed = new Error('network down');
+  const again = await getNews('General');
+  assert.strictEqual(again.length, 1);
+  assert.strictEqual(again[0].title, 'Cached story');
 });

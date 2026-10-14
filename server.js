@@ -252,7 +252,8 @@ async function getNews(category) {
     return true;
   });
 
-  cache.set(cacheKey, unique);
+  // Don't cache empty results so a temporary feed outage doesn't stick for the TTL
+  if (unique.length) cache.set(cacheKey, unique);
   return unique;
 }
 
@@ -294,7 +295,7 @@ app.get('/api/sources', (req, res) => {
   res.json(NEWS_SOURCES.map(({ name, category }) => ({ name, category })));
 });
 
-module.exports = { app, safeUrl, fetchFeed };
+module.exports = { app, safeUrl, fetchFeed, getNews, cache };
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
