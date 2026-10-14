@@ -261,14 +261,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const CATEGORIES = new Set(NEWS_SOURCES.map((s) => s.category));
 
+// Strict integer query param: a single plain-digit string, or the default when absent.
+// Express 5 gives arrays for repeated params, and parseInt would accept '5abc' / '1e3'.
+function intParam(value, fallback) {
+  if (value === undefined) return fallback;
+  return typeof value === 'string' && /^\d{1,6}$/.test(value) ? Number.parseInt(value, 10) : null;
+}
+
 app.get('/api/news', async (req, res) => {
   const { category } = req.query;
   if (category !== undefined && category !== 'all' && !CATEGORIES.has(category)) {
     return res.status(400).json({ error: 'Invalid category' });
   }
-  const page = Number.parseInt(req.query.page ?? '1', 10);
-  const limit = Number.parseInt(req.query.limit ?? '20', 10);
-  if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 50) {
+  const page = intParam(req.query.page, 1);
+  const limit = intParam(req.query.limit, 20);
+  if (page === null || page < 1 || limit === null || limit < 1 || limit > 50) {
     return res.status(400).json({ error: 'Invalid page or limit' });
   }
   try {
@@ -295,7 +302,19 @@ app.get('/api/sources', (req, res) => {
   res.json(NEWS_SOURCES.map(({ name, category }) => ({ name, category })));
 });
 
-module.exports = { app, safeUrl, fetchFeed, getNews, cache };
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Final handler: never send err.message, stacks or paths to clients.
+function errorHandler(err, req, res, next) {
+  const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status === 500) console.error('Unhandled error:', err);
+  res.status(status).json({ error: status === 500 ? 'Internal error' : status === 404 ? 'Not found' : 'Bad request' });
+}
+app.use(errorHandler);
+
+module.exports = { app, safeUrl, fetchFeed, getNews, cache, errorHandler };
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
