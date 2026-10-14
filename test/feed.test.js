@@ -1,17 +1,18 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const Parser = require('rss-parser');
 
-// Stub network access before the server module creates its parser usage
-const original = Parser.prototype.parseURL;
+const { fetchFeed, getNews, cache, feedLoader, NEGATIVE_CACHE_SECONDS } = require('../server');
+
+// Stub network access: replace the loader that fetches and parses a feed URL
+const original = feedLoader.parse;
 let nextFeed;
-Parser.prototype.parseURL = async () => {
+let calls = 0;
+feedLoader.parse = async () => {
+  calls++;
   if (nextFeed instanceof Error) throw nextFeed;
   return nextFeed;
 };
-test.after(() => { Parser.prototype.parseURL = original; });
-
-const { fetchFeed, getNews, cache } = require('../server');
+test.after(() => { feedLoader.parse = original; });
 const src = { name: 'Src', url: 'https://example.com/rss', category: 'General' };
 
 test('fetchFeed strips unsafe link and image URLs and HTML from summaries', async () => {
@@ -43,24 +44,80 @@ test('fetchFeed returns [] when the feed errors', async () => {
   assert.deepStrictEqual(await fetchFeed(src), []);
 });
 
-test('getNews does not cache an empty result, so a feed outage recovers on the next request', async () => {
+test('General category fixture matches the source list', async () => {
+  cache.flushAll();
+  calls = 0;
+  nextFeed = { items: [{ title: 'x', link: 'https://example.com/x' }] };
+  await getNews('General');
+  GENERAL_SOURCES_ACTUAL = calls;
+  assert.ok(calls > 1, 'expected several General sources');
+});
+let GENERAL_SOURCES_ACTUAL;
+
+test('an empty result is only negatively cached for a short time, then retried', async () => {
   cache.flushAll();
   nextFeed = new Error('network down');
   assert.deepStrictEqual(await getNews('General'), []);
-  assert.strictEqual(cache.get('news_General'), undefined);
 
+  // Cached briefly so an outage is not retried by every request, but far shorter than the 5-minute TTL
+  const ttlMs = cache.getTtl('news_General') - Date.now();
+  assert.ok(ttlMs > 0 && ttlMs <= NEGATIVE_CACHE_SECONDS * 1000, `ttl ${ttlMs}ms`);
+  assert.ok(NEGATIVE_CACHE_SECONDS <= 30);
+
+  // While negatively cached the feeds are not hit again
+  calls = 0;
+  assert.deepStrictEqual(await getNews('General'), []);
+  assert.strictEqual(calls, 0);
+
+  // Once the negative entry expires, the next request retries and recovers
+  cache.del('news_General');
   nextFeed = { items: [{ title: 'Back online', link: 'https://example.com/ok' }] };
   const articles = await getNews('General');
   assert.strictEqual(articles.length, 1);
   assert.strictEqual(articles[0].title, 'Back online');
 });
 
-test('getNews caches non-empty results', async () => {
+test('getNews caches non-empty results for the full TTL', async () => {
   cache.flushAll();
   nextFeed = { items: [{ title: 'Cached story', link: 'https://example.com/c' }] };
   await getNews('General');
+  const ttlMs = cache.getTtl('news_General') - Date.now();
+  assert.ok(ttlMs > NEGATIVE_CACHE_SECONDS * 1000);
+
+  calls = 0;
   nextFeed = new Error('network down');
   const again = await getNews('General');
-  assert.strictEqual(again.length, 1);
+  assert.strictEqual(calls, 0);
   assert.strictEqual(again[0].title, 'Cached story');
+});
+
+test('concurrent cache misses share one fetch round', async () => {
+  cache.flushAll();
+  nextFeed = { items: [{ title: 'Shared', link: 'https://example.com/s' }] };
+  calls = 0;
+  const [a, b, c] = await Promise.all([getNews('General'), getNews('General'), getNews('General')]);
+  assert.strictEqual(calls, GENERAL_SOURCES_ACTUAL, 'one fetch per source, not three');
+  assert.strictEqual(a, b);
+  assert.strictEqual(b, c);
+});
+
+test('concurrent misses during an outage also share one round, and later calls retry', async () => {
+  cache.flushAll();
+  nextFeed = new Error('network down');
+  calls = 0;
+  await Promise.all([getNews('General'), getNews('General')]);
+  assert.strictEqual(calls, GENERAL_SOURCES_ACTUAL);
+
+  cache.flushAll();
+  calls = 0;
+  await getNews('General'); // in-flight entry was cleaned up, so this runs a new round
+  assert.strictEqual(calls, GENERAL_SOURCES_ACTUAL);
+});
+
+test('different categories are fetched independently', async () => {
+  cache.flushAll();
+  nextFeed = { items: [{ title: 'Cat', link: 'https://example.com/cat' }] };
+  calls = 0;
+  await Promise.all([getNews('General'), getNews('Technology')]);
+  assert.ok(calls > GENERAL_SOURCES_ACTUAL);
 });

@@ -56,16 +56,16 @@ test('rejects ambiguous or non-integer page/limit values', async () => {
 });
 
 test('accepts plain integer page/limit', async () => {
-  const Parser = require('rss-parser');
-  const original = Parser.prototype.parseURL;
-  Parser.prototype.parseURL = async () => ({ items: [] }); // no network
+  const { feedLoader } = require('../server');
+  const original = feedLoader.parse;
+  feedLoader.parse = async () => ({ items: [] }); // no network
   try {
     for (const q of ['', 'page=1&limit=5', 'page=2&limit=50', 'page=007']) {
       const res = await fetch(`${base}/api/news?${q}`);
       assert.strictEqual(res.status, 200, q);
     }
   } finally {
-    Parser.prototype.parseURL = original;
+    feedLoader.parse = original;
   }
 });
 
