@@ -6,6 +6,7 @@ Express app that aggregates RSS feeds and serves a static frontend from `public/
 - `npm start` — run server (PORT env, default 3000)
 - `npm test` — node:test suite in `test/`
 - `npm run audit` — dependency audit (must pass before merging)
+- `npm run live-check` — fetch the real feeds and report per-feed status (needs network; not part of `npm test`)
 
 ## Conventions
 - Feed content is untrusted. Never put feed data in `innerHTML` without `escHtml`, and only allow http(s) URLs (`safeUrl` on the server, regex check on the client).
