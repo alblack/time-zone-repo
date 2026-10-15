@@ -117,3 +117,12 @@ test('CSP directives are as intended (img-src has no data:, no unsafe-* or wildc
   assert.strictEqual(d['frame-ancestors'], "'none'");
   assert.ok(!/unsafe-|\*/.test(csp), csp);
 });
+
+test('errorHandler defers to Express when headers were already sent', () => {
+  const { errorHandler } = require('../server');
+  const err = new Error('late failure');
+  let passed;
+  const res = { headersSent: true, status() { throw new Error('must not write a response'); } };
+  errorHandler(err, {}, res, (e) => { passed = e; });
+  assert.strictEqual(passed, err);
+});

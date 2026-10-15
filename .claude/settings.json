@@ -3,10 +3,12 @@
     "allow": [
       "Bash(npm test)",
       "Bash(npm run audit)",
-      "Bash(npm audit*)",
+      "Bash(npm audit)",
       "Bash(npm ls*)",
       "Bash(git status*)",
-      "Bash(git diff*)",
+      "Bash(git diff)",
+      "Bash(git diff --staged)",
+      "Bash(git diff origin/main...HEAD)",
       "Bash(git log*)"
     ],
     "deny": [
@@ -15,6 +17,8 @@
       "Read(**/*.pem)",
       "Read(**/*.key)",
       "Edit(./.env*)",
+      "Bash(cat .env*)",
+      "Bash(cat ./.env*)",
       "Bash(curl*)",
       "Bash(wget*)",
       "Bash(rm -rf*)",
@@ -33,18 +37,18 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/block-secrets.js" }
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-secrets.js\"" }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-html-sinks.js\"" },
-          { "type": "command", "command": "npm test --silent" }
+          { "type": "command", "command": "npm --prefix \"$CLAUDE_PROJECT_DIR\" test --silent" }
         ]
       }
     ]

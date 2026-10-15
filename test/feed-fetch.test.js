@@ -5,6 +5,7 @@ const zlib = require('node:zlib');
 
 // Small cap so the tests stay fast; read once when server.js loads.
 process.env.FEED_MAX_BYTES = '2000';
+process.env.FEED_TIMEOUT_MS = '300'; // short, so the slow-drip test is fast
 const { feedLoader, FEED_MAX_BYTES } = require('../server');
 
 const rss = (title, pad = '') =>
@@ -44,6 +45,21 @@ test.before(async () => {
       res.setHeader('content-encoding', 'gzip');
       res.setHeader('content-type', 'application/rss+xml');
       return res.end(zlib.gzipSync(Buffer.from(rss('Zipped'))));
+    }
+    if (req.url === '/slow') {
+      // Headers and a first chunk arrive in time, then the body drips forever
+      res.setHeader('content-type', 'application/rss+xml');
+      res.write('<?xml version="1.0"?><rss><channel>');
+      const t = setInterval(() => res.write(' '), 50);
+      res.on('close', () => clearInterval(t));
+      return;
+    }
+    if (req.url === '/redirect-same') { res.statusCode = 302; res.setHeader('location', '/ok'); return res.end(); }
+    if (req.url === '/redirect-loop') { res.statusCode = 302; res.setHeader('location', '/redirect-loop'); return res.end(); }
+    if (req.url.startsWith('/redirect-to/')) {
+      res.statusCode = 302;
+      res.setHeader('location', decodeURIComponent(req.url.slice('/redirect-to/'.length)));
+      return res.end();
     }
     if (req.url === '/exact') {
       const base = rss('Exact', '');
@@ -98,4 +114,34 @@ test('the cap applies after decompression (gzip bomb)', async () => {
 test('still reads a normal gzip-compressed feed', async () => {
   const feed = await feedLoader.parse(`${base}/gzip-ok`);
   assert.strictEqual(feed.items[0].title, 'Zipped');
+});
+
+test('a body that drips slowly is cut off by the timeout', async () => {
+  const started = Date.now();
+  await assert.rejects(feedLoader.parse(`${base}/slow`));
+  assert.ok(Date.now() - started < 3000, 'must abort near FEED_TIMEOUT_MS, not hang');
+});
+
+test('same-origin redirects are followed', async () => {
+  const feed = await feedLoader.parse(`${base}/redirect-same`);
+  assert.strictEqual(feed.items[0].title, 'Hello');
+});
+
+test('a redirect loop is stopped', async () => {
+  await assert.rejects(feedLoader.parse(`${base}/redirect-loop`), /redirect/i);
+});
+
+test('redirects to internal or non-http targets are refused without being requested', async () => {
+  const port = server.address().port;
+  const targets = [
+    'http://169.254.169.254/latest/meta-data/', // cloud metadata
+    'http://10.0.0.5/feed', 'http://192.168.1.1/', 'http://172.16.0.9/', 'http://127.0.0.2/',
+    'http://[::1]/', 'http://[fd00::1]/', 'http://[fe80::1]/', 'http://[::ffff:127.0.0.1]/',
+    `http://localhost:${port}/ok`, 'http://LOCALHOST/ok', 'http://foo.localhost/ok',
+    'http://0.0.0.0/', 'http://2130706433/', // decimal form of 127.0.0.1
+    'file:///etc/passwd', 'ftp://example.com/feed',
+  ];
+  for (const t of targets) {
+    await assert.rejects(feedLoader.parse(`${base}/redirect-to/${encodeURIComponent(t)}`), /redirect/i, t);
+  }
 });

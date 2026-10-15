@@ -26,7 +26,9 @@
 ## Known gaps / inference (not verified)
 - Live RSS fetching was not exercised (sandbox network); feed handling is covered by `test/feed.test.js` with a stubbed parser, not real feeds.
 - CSP and client sanitization were verified in headless Chromium with a stubbed `/api/news` containing hostile data (`javascript:` link, HTML in title, broken image): link became `#`, no HTML injected, image fell back to the placeholder, CSP raised no violations on the app's own assets. This check is a one-off script, not part of `npm test`.
-- Side effect of the CSP: `img-src` allows https only, so articles with plain-http images show the placeholder icon.
-- Rate limiting is per-IP; behind a proxy set `app.set('trust proxy', …)` appropriately.
+- Side effect of the CSP: `img-src` is `'self' https:` (no `data:`), so articles with plain-http images show the placeholder icon. Allowing any https host is deliberate (feed images come from publisher CDNs) but means a publisher can see reader IPs, like a tracking pixel.
+- Rate limiting is per-IP. Behind a reverse proxy set `TRUST_PROXY` (hop count such as `1`, or a list of `loopback`/IPs/CIDRs); otherwise every user shares the proxy's single 60 req/min bucket. `true`, `*` and CIDRs wider than /8 (IPv4) or /16 (IPv6, except fc00::/7 and fe80::/10) are rejected because they let clients pick their own IP; an invalid value stops startup. The hop count must equal the real number of proxies. Unset = trust no proxy.
 - Some feed URLs (e.g. Reuters) may be defunct — a reliability, not security, issue.
 - Enable branch protection and GitHub secret scanning in repo settings (cannot be done from code).
+- Feed fetching is bounded: 10 s total, 2 MiB after decompression (`FEED_TIMEOUT_MS`, `FEED_MAX_BYTES`), at most 5 redirects. A redirect to another origin must be http(s) and may not point at localhost or a private, link-local, metadata or multicast IP literal. A hostname that merely resolves to an internal address (DNS rebinding) is not blocked. Feed URLs are fixed constants, not request input.
+- The secret-blocking hook is a pattern list (AWS, GitHub, Anthropic, Slack, Google, Stripe, private keys); it does not see Bash redirects such as `echo > file`.
